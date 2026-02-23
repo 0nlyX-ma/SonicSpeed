@@ -9,6 +9,14 @@ const DEFAULTS = Object.freeze({
 
 const LICENSE_ACCEPTED_SANITIZED = "OFFLINEBETA2026";
 const PRO_URL = "https://example.com/sonicspeed-pro";
+const TRIAL_DURATION_MS = 15 * 60 * 1000;
+const VIZ_BOOST_PRO = 1.5;
+
+const PRESETS = Object.freeze({
+  movie: { volumeBoost: 1.5, speed: 1, nightMode: true, pitchSemitones: 0 },
+  music: { volumeBoost: 1, speed: 1, nightMode: false, pitchSemitones: 0 },
+  podcast: { volumeBoost: 1.2, speed: 1.2, nightMode: true, pitchSemitones: 0 },
+});
 
 function clampNumber(value, min, max) {
   if (!Number.isFinite(value)) return min;
@@ -75,12 +83,83 @@ async function saveDomainSettings(hostname, allDomainSettings, settings) {
 }
 
 async function loadIsPro() {
-  const stored = await browser.storage.local.get("isPro");
-  return Boolean(stored.isPro ?? false);
+  try {
+    const stored = await browser.storage.local.get("isPro");
+    return Boolean(stored.isPro ?? false);
+  } catch {
+    return false;
+  }
 }
 
 async function saveIsPro(isPro) {
-  await browser.storage.local.set({ isPro: Boolean(isPro) });
+  try {
+    await browser.storage.local.set({ isPro: Boolean(isPro) });
+  } catch {
+    // ignore
+  }
+}
+
+async function loadTrialStartTime() {
+  try {
+    const stored = await browser.storage.local.get("trialStartTime");
+    const t = stored.trialStartTime;
+    return typeof t === "number" && t > 0 ? t : null;
+  } catch {
+    return null;
+  }
+}
+
+async function saveTrialStartTime(timestamp) {
+  try {
+    if (timestamp == null) {
+      await browser.storage.local.remove("trialStartTime");
+    } else {
+      await browser.storage.local.set({ trialStartTime: timestamp });
+    }
+  } catch {
+    // ignore
+  }
+}
+
+function getTrialRemainingMs(startTime) {
+  if (!startTime) return 0;
+  const elapsed = Date.now() - startTime;
+  return Math.max(0, TRIAL_DURATION_MS - elapsed);
+}
+
+function isTrialActive(startTime) {
+  return getTrialRemainingMs(startTime) > 0;
+}
+
+async function loadMyMix() {
+  try {
+    const stored = await browser.storage.local.get("myMix");
+    const m = stored.myMix;
+    if (!m || typeof m !== "object") return null;
+    return {
+      volumeBoost: clampNumber(Number(m.volumeBoost ?? 1), 1, 6),
+      speed: clampNumber(Number(m.speed ?? 1), 0.1, 16),
+      nightMode: Boolean(m.nightMode ?? false),
+      pitchSemitones: clampNumber(Number(m.pitchSemitones ?? 0), -12, 12),
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function saveMyMixToStorage(settings) {
+  try {
+    await browser.storage.local.set({
+      myMix: {
+        volumeBoost: settings.volumeBoost,
+        speed: settings.speed,
+        nightMode: settings.nightMode,
+        pitchSemitones: settings.pitchSemitones,
+      },
+    });
+  } catch {
+    // ignore
+  }
 }
 
 function setStatus(el, message) {
@@ -88,17 +167,11 @@ function setStatus(el, message) {
 }
 
 function setControlsEnabled(enabled) {
-  document.getElementById("volume").disabled = !enabled;
-  document.getElementById("speed").disabled = !enabled;
-  document.getElementById("nightMode").disabled = !enabled;
-  document.getElementById("pitch").disabled = !enabled;
-  document.getElementById("reset").disabled = !enabled;
-  document.getElementById("tabHome").disabled = !enabled;
-  document.getElementById("tabLicense").disabled = !enabled;
-  document.getElementById("licenseKey").disabled = !enabled;
-  document.getElementById("activate").disabled = !enabled;
-  document.getElementById("deactivate").disabled = !enabled;
-  document.getElementById("goPro").disabled = !enabled;
+  const ids = ["volume", "speed", "nightMode", "pitch", "reset", "tabHome", "tabLicense", "licenseKey", "activate", "deactivate", "goPro", "startTrial", "presetMovie", "presetMusic", "presetPodcast", "presetMyMix", "saveMyMix", "trialOverlayUpgrade"];
+  for (const id of ids) {
+    const el = document.getElementById(id);
+    if (el) el.disabled = !enabled;
+  }
 }
 
 function setActiveTab(tabName) {
@@ -114,17 +187,25 @@ function setActiveTab(tabName) {
   viewLicense.classList.toggle("viewHidden", isHome);
 }
 
-function renderProStatus(isPro) {
+function renderProStatus(effectivePro) {
   const pill = document.getElementById("proPill");
   if (!pill) return;
-  pill.textContent = isPro ? "PRO" : "FREE";
-  pill.classList.toggle("pillPro", isPro);
+  pill.textContent = effectivePro ? "PRO" : "FREE";
+  pill.classList.toggle("pillPro", effectivePro);
 }
 
-/** Call after license change to sync badge, locks, and pro/free controls. */
-function refreshProUi(isPro) {
-  renderProStatus(isPro);
-  applyProGatingToUi(isPro);
+/** Call after license or trial change to sync badge, locks, and pro/free controls. */
+function refreshProUi(effectivePro) {
+  renderProStatus(effectivePro);
+  applyProGatingToUi(effectivePro);
+}
+
+/** Return preset settings clamped for current plan (free vs pro). myMix loads from storage. */
+function presetForPlan(presetKey, isPro) {
+  if (presetKey === "myMix") return null; // myMix is resolved async in applyPreset
+  const p = PRESETS[presetKey];
+  if (!p) return null;
+  return sanitizeSettingsForPlan(p, isPro);
 }
 
 function renderUi(settings) {
@@ -153,9 +234,13 @@ function applyProGatingToUi(isPro) {
   const lockNightMode = document.getElementById("lockNightMode");
   const lockPitch = document.getElementById("lockPitch");
   const lockViz = document.getElementById("lockViz");
+  const lockPresets = document.getElementById("lockPresets");
   const proCta = document.getElementById("proCta");
   const vizWrap = document.getElementById("vizWrap");
   const vizStatus = document.getElementById("vizStatus");
+  const presetRow = document.getElementById("presetRow");
+  const startTrial = document.getElementById("startTrial");
+  const saveMyMix = document.getElementById("saveMyMix");
 
   const nightModeRow = document.getElementById("nightModeRow");
   const nightModeInput = document.getElementById("nightMode");
@@ -163,12 +248,17 @@ function applyProGatingToUi(isPro) {
   const pitchSlider = document.getElementById("pitch");
   const volumeSlider = document.getElementById("volume");
 
-  // When PRO: hide all lock icons. When FREE: show all.
+  // When PRO (or trial): hide all lock icons. When FREE: show all.
   const visibility = isPro ? "hidden" : "visible";
   lockUltra.style.visibility = visibility;
   if (lockNightMode) lockNightMode.style.visibility = visibility;
   if (lockPitch) lockPitch.style.visibility = visibility;
   if (lockViz) lockViz.style.visibility = visibility;
+  if (lockPresets) lockPresets.style.visibility = visibility;
+
+  if (presetRow) presetRow.classList.toggle("presetsLocked", !isPro);
+  if (startTrial) startTrial.style.display = isPro ? "none" : "";
+  if (saveMyMix) saveMyMix.classList.toggle("viewHidden", !isPro);
 
   if (!isPro) {
     if (nightModeRow) nightModeRow.classList.add("disabled");
@@ -255,7 +345,7 @@ async function getVizFrame(tabId) {
   }
 }
 
-function drawVisualizer(canvas, levels) {
+function drawVisualizer(canvas, levels, boost) {
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
 
@@ -266,11 +356,12 @@ function drawVisualizer(canvas, levels) {
   const n = Array.isArray(levels) ? levels.length : 0;
   if (n === 0) return;
 
+  const mult = typeof boost === "number" && boost > 0 ? boost : 1;
   const gap = 2;
   const barW = Math.max(2, Math.floor((w - gap * (n - 1)) / n));
   let x = 0;
   for (let i = 0; i < n; i++) {
-    const v = clampNumber(Number(levels[i]), 0, 1);
+    const v = clampNumber(Number(levels[i]) * mult, 0, 1);
     const bh = Math.max(2, Math.floor(v * (h - 8)));
     const y = h - bh;
 
@@ -288,7 +379,15 @@ function drawVisualizer(canvas, levels) {
 
 document.addEventListener("DOMContentLoaded", async () => {
   const statusEl = document.getElementById("status");
+  try {
+    await runPopupLogic(statusEl);
+  } catch (err) {
+    if (statusEl) statusEl.textContent = "Something went wrong.";
+    setControlsEnabled(false);
+  }
+});
 
+async function runPopupLogic(statusEl) {
   const tab = await getActiveTab();
   const hostname = tab ? getHostnameFromUrl(tab.url ?? "") : null;
   if (!tab || !hostname || typeof tab.id !== "number") {
@@ -313,22 +412,41 @@ document.addEventListener("DOMContentLoaded", async () => {
   );
 
   let isPro = await loadIsPro();
-  refreshProUi(isPro);
+  let trialStartTime = await loadTrialStartTime();
+  let showTrialEndedOverlay = false;
+  if (trialStartTime && !isTrialActive(trialStartTime)) {
+    try {
+      await saveTrialStartTime(null);
+    } catch {
+      // ignore
+    }
+    trialStartTime = null;
+    showTrialEndedOverlay = true;
+  }
+  let effectivePro = isPro || isTrialActive(trialStartTime);
+  refreshProUi(effectivePro);
+  if (showTrialEndedOverlay) {
+    document.getElementById("trialEndedOverlay").classList.remove("viewHidden");
+  }
 
-  const { all, settings: storedSettings } = await loadDomainSettings(hostname);
-  const effectiveSettings = sanitizeSettingsForPlan(storedSettings, isPro);
+  const { all, settings: storedSettings } = await loadDomainSettings(hostname).catch(() => ({ all: {}, settings: { ...DEFAULTS } }));
+  const effectiveSettings = sanitizeSettingsForPlan(storedSettings, effectivePro);
   renderUi(effectiveSettings);
 
   // If not pro, clamp any previously-saved pro-only values.
-  const clamped = sanitizeSettingsForPlan(storedSettings, isPro);
+  const clamped = sanitizeSettingsForPlan(storedSettings, effectivePro);
   if (
     clamped.volumeBoost !== storedSettings.volumeBoost ||
     clamped.nightMode !== storedSettings.nightMode ||
     clamped.pitchSemitones !== storedSettings.pitchSemitones
   ) {
-    await browser.storage.local.set({
-      domainSettings: { ...all, [hostname]: { ...storedSettings, ...clamped } },
-    });
+    try {
+      await browser.storage.local.set({
+        domainSettings: { ...all, [hostname]: { ...storedSettings, ...clamped } },
+      });
+    } catch {
+      // ignore
+    }
   }
 
   const pingRes = await ping(tab.id);
@@ -358,11 +476,13 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   }
 
+  const vizBoost = () => (effectivePro ? VIZ_BOOST_PRO : 1);
+
   const startVizLoop = () => {
     popupClosed = false;
     if (vizTimer) window.clearInterval(vizTimer);
     vizTimer = window.setInterval(async () => {
-      if (popupClosed || !isPro) return;
+      if (popupClosed || !effectivePro) return;
       if (vizInFlight) return;
       vizInFlight = true;
       try {
@@ -372,26 +492,66 @@ document.addEventListener("DOMContentLoaded", async () => {
         if (!frame || frame.ok !== true) {
           vizStatus.textContent = "—";
           document.getElementById("vizWrap").classList.remove("vizLive");
-          drawVisualizer(vizCanvas, []);
+          drawVisualizer(vizCanvas, [], 1);
           return;
         }
         vizStatus.textContent = frame.active ? "LIVE" : "IDLE";
         document.getElementById("vizWrap").classList.toggle("vizLive", frame.active);
-        drawVisualizer(vizCanvas, frame.levels);
+        drawVisualizer(vizCanvas, frame.levels, vizBoost());
       } finally {
         vizInFlight = false;
       }
     }, 70);
   };
+  // Visualizer runs only while popup is open; stop on close to save CPU/RAM.
   startVizLoop();
-
   window.addEventListener("unload", stopVisualizer, { passive: true });
   window.addEventListener("beforeunload", stopVisualizer, { passive: true });
+  window.addEventListener("pagehide", stopVisualizer, { passive: true });
+
+  let countdownTimer = 0;
+
+  function updateTrialCountdown() {
+    const el = document.getElementById("trialCountdown");
+    if (!el) return;
+    const rem = getTrialRemainingMs(trialStartTime);
+    if (rem <= 0) {
+      el.textContent = "";
+      el.classList.add("viewHidden");
+      if (countdownTimer) {
+        clearInterval(countdownTimer);
+        countdownTimer = 0;
+      }
+      trialStartTime = null;
+      effectivePro = isPro;
+      saveTrialStartTime(null).then(() => {});
+      refreshProUi(effectivePro);
+      document.getElementById("trialEndedOverlay").classList.remove("viewHidden");
+      return;
+    }
+    const m = Math.floor(rem / 60000);
+    const s = Math.floor((rem % 60000) / 1000);
+    el.textContent = `Trial: ${m}:${s.toString().padStart(2, "0")}`;
+    el.classList.remove("viewHidden");
+  }
+
+  if (trialStartTime && isTrialActive(trialStartTime)) {
+    updateTrialCountdown();
+    countdownTimer = window.setInterval(updateTrialCountdown, 1000);
+  } else {
+    document.getElementById("trialCountdown").classList.add("viewHidden");
+  }
+
+  window.addEventListener("unload", () => { if (countdownTimer) clearInterval(countdownTimer); }, { passive: true });
 
   const debouncedApply = createDebounced(async () => {
-    const nextSettings = readUiSettings(isPro);
+    const nextSettings = readUiSettings(effectivePro);
     renderUi(nextSettings);
-    allDomainSettings = await saveDomainSettings(hostname, allDomainSettings, nextSettings);
+    try {
+      allDomainSettings = await saveDomainSettings(hostname, allDomainSettings, nextSettings);
+    } catch {
+      // ignore
+    }
     const ok = await sendApplyMessage(tab.id, hostname, nextSettings);
     setStatus(
       statusEl,
@@ -401,7 +561,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   const volumeSliderEl = document.getElementById("volume");
   volumeSliderEl.addEventListener("input", (e) => {
-    const v = clampNumber(Number(e.currentTarget.value), 1, isPro ? 6 : 3);
+    const v = clampNumber(Number(e.currentTarget.value), 1, effectivePro ? 6 : 3);
     volumeValue.textContent = formatPercentFromBoost(v);
     volumeSliderEl.classList.toggle("sliderUltraBoost", v > 3);
     debouncedApply();
@@ -423,9 +583,41 @@ document.addEventListener("DOMContentLoaded", async () => {
     debouncedApply();
   });
 
+  document.getElementById("startTrial").addEventListener("click", async () => {
+    try {
+      await saveTrialStartTime(Date.now());
+      trialStartTime = Date.now();
+      effectivePro = true;
+      refreshProUi(effectivePro);
+      updateTrialCountdown();
+      if (countdownTimer) clearInterval(countdownTimer);
+      countdownTimer = window.setInterval(updateTrialCountdown, 1000);
+      startVizLoop();
+      setStatus(statusEl, "Trial started. Enjoy Pro for 15 min.");
+      const loaded = await loadDomainSettings(hostname).catch(() => ({ all: {}, settings: { ...DEFAULTS } }));
+      const effective = sanitizeSettingsForPlan(loaded.settings, true);
+      renderUi(effective);
+      allDomainSettings = loaded.all;
+      allDomainSettings = await saveDomainSettings(hostname, allDomainSettings, effective);
+      await sendApplyMessage(tab.id, hostname, effective);
+    } catch {
+      setStatus(statusEl, "Could not start trial.");
+    }
+  });
+
   document.getElementById("goPro").addEventListener("click", async () => {
     await browser.tabs.create({ url: PRO_URL });
   });
+
+  function shakeGoPro() {
+    const btn = document.getElementById("goPro");
+    if (btn) {
+      btn.classList.remove("goProShake");
+      btn.offsetHeight;
+      btn.classList.add("goProShake");
+      setTimeout(() => btn.classList.remove("goProShake"), 400);
+    }
+  }
 
   document.getElementById("reset").addEventListener("click", async () => {
     const toSave = { ...DEFAULTS };
@@ -433,6 +625,55 @@ document.addEventListener("DOMContentLoaded", async () => {
     allDomainSettings = await saveDomainSettings(hostname, allDomainSettings, toSave);
     const ok = await sendApplyMessage(tab.id, hostname, toSave);
     setStatus(statusEl, ok ? `Reset for ${hostname}.` : `Reset saved (page unreachable).`);
+  });
+
+  async function applyPreset(presetKey) {
+    if (!effectivePro && presetKey !== "myMix") {
+      shakeGoPro();
+      return;
+    }
+    let settings;
+    if (presetKey === "myMix") {
+      settings = await loadMyMix();
+      if (!settings) {
+        setStatus(statusEl, "No mix saved. Use Save My Mix first.");
+        return;
+      }
+      settings = sanitizeSettingsForPlan(settings, true);
+    } else {
+      settings = presetForPlan(presetKey, effectivePro);
+    }
+    if (!settings) return;
+    renderUi(settings);
+    try {
+      allDomainSettings = await saveDomainSettings(hostname, allDomainSettings, settings);
+    } catch {
+      // ignore
+    }
+    const ok = await sendApplyMessage(tab.id, hostname, settings);
+    setStatus(statusEl, ok ? `Preset applied for ${hostname}.` : `Preset saved (page unreachable).`);
+  }
+
+  document.getElementById("presetMovie").addEventListener("click", () => void applyPreset("movie"));
+  document.getElementById("presetMusic").addEventListener("click", () => void applyPreset("music"));
+  document.getElementById("presetPodcast").addEventListener("click", () => void applyPreset("podcast"));
+  document.getElementById("presetMyMix").addEventListener("click", () => void applyPreset("myMix"));
+
+  document.getElementById("saveMyMix").addEventListener("click", async () => {
+    const settings = readUiSettings(effectivePro);
+    await saveMyMixToStorage(settings);
+    setStatus(statusEl, "Mix saved!");
+  });
+
+  document.getElementById("trialEndedOverlay").addEventListener("click", (e) => {
+    if (e.target.id === "trialOverlayUpgrade" || e.target.closest("#trialOverlayUpgrade")) {
+      document.getElementById("trialEndedOverlay").classList.add("viewHidden");
+      browser.tabs.create({ url: PRO_URL });
+    }
+  });
+  document.getElementById("trialOverlayUpgrade").addEventListener("click", () => {
+    document.getElementById("trialEndedOverlay").classList.add("viewHidden");
+    browser.tabs.create({ url: PRO_URL });
   });
 
   document.getElementById("tabHome").addEventListener("click", () => setActiveTab("home"));
@@ -446,13 +687,27 @@ document.addEventListener("DOMContentLoaded", async () => {
       return;
     }
     const ok = sanitized === LICENSE_ACCEPTED_SANITIZED;
-    await saveIsPro(ok);
+    try {
+      await saveIsPro(ok);
+    } catch {
+      setStatus(statusEl, "Could not save license.");
+      return;
+    }
     isPro = ok;
-    refreshProUi(isPro);
+    if (ok) {
+      await saveTrialStartTime(null);
+      trialStartTime = null;
+      if (countdownTimer) clearInterval(countdownTimer);
+      countdownTimer = 0;
+      document.getElementById("trialCountdown").classList.add("viewHidden");
+      document.getElementById("trialEndedOverlay").classList.add("viewHidden");
+    }
+    effectivePro = isPro || isTrialActive(trialStartTime);
+    refreshProUi(effectivePro);
     setStatus(statusEl, ok ? "Pro activated." : "Invalid key.");
     startVizLoop();
-    const loaded = await loadDomainSettings(hostname);
-    const effective = sanitizeSettingsForPlan(loaded.settings, isPro);
+    const loaded = await loadDomainSettings(hostname).catch(() => ({ all: {}, settings: { ...DEFAULTS } }));
+    const effective = sanitizeSettingsForPlan(loaded.settings, effectivePro);
     renderUi(effective);
     allDomainSettings = loaded.all;
     allDomainSettings = await saveDomainSettings(hostname, allDomainSettings, effective);
@@ -460,17 +715,22 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
 
   document.getElementById("deactivate").addEventListener("click", async () => {
-    await saveIsPro(false);
+    try {
+      await saveIsPro(false);
+    } catch {
+      // ignore
+    }
     isPro = false;
-    refreshProUi(isPro);
+    effectivePro = isTrialActive(trialStartTime);
+    refreshProUi(effectivePro);
     setStatus(statusEl, "Pro disabled.");
-    drawVisualizer(vizCanvas, []);
-    const loaded = await loadDomainSettings(hostname);
-    const effective = sanitizeSettingsForPlan(loaded.settings, isPro);
+    drawVisualizer(vizCanvas, [], 1);
+    const loaded = await loadDomainSettings(hostname).catch(() => ({ all: {}, settings: { ...DEFAULTS } }));
+    const effective = sanitizeSettingsForPlan(loaded.settings, effectivePro);
     renderUi(effective);
     allDomainSettings = loaded.all;
     allDomainSettings = await saveDomainSettings(hostname, allDomainSettings, effective);
     await sendApplyMessage(tab.id, hostname, effective);
   });
-});
+}
 

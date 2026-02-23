@@ -3,6 +3,14 @@
   "name": "SonicSpeed Pro",
   "description": "Neon OLED volume boost, speed control, and pro audio features for any HTML5 video, with per-site memory.",
   "version": "1.0.0",
+  "icons": {
+    "16": "icon16.png",
+    "32": "icon32.png",
+    "48": "icon48.png",
+    "64": "icon64.png",
+    "96": "icon96.png",
+    "128": "icon128.png"
+  },
   "browser_specific_settings": {
     "gecko": {
       "id": "sonicspeed-pro@example.com"
@@ -12,12 +20,22 @@
     "default_title": "SonicSpeed Pro",
     "default_popup": "popup.html"
   },
-  "permissions": ["storage", "activeTab", "scripting"],
-  "host_permissions": ["<all_urls>"],
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
-      "js": ["content.js"],
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "content.js"
+      ],
       "run_at": "document_idle"
     }
   ],

@@ -13,7 +13,10 @@
           <div class="title">SonicSpeed</div>
           <div class="subtitle">Pro</div>
         </div>
-        <div class="pill" id="proPill" aria-label="Pro status">FREE</div>
+        <div class="headerBadges">
+          <span id="trialCountdown" class="trialCountdown" aria-label="Trial time remaining"></span>
+          <div class="pill" id="proPill" aria-label="Pro status">FREE</div>
+        </div>
       </header>
 
       <nav class="tabs" aria-label="Navigation tabs">
@@ -103,6 +106,7 @@
           </div>
 
           <div class="proCta" id="proCta" aria-label="Go Pro call to action">
+            <button id="startTrial" class="btn btnSecondary" type="button">Start 15-Min Free Trial</button>
             <button id="goPro" class="btn btnPrimary" type="button">Go Pro</button>
             <div class="miniHint">Unlock Ultra-Boost, Night Mode, Pitch, and Visualizer.</div>
           </div>
@@ -146,6 +150,27 @@
           </button>
         </section>
       </section>
+
+      <section class="presets card" aria-label="Presets">
+        <div class="row">
+          <div class="labelTitle">Presets <span class="lock" id="lockPresets" aria-hidden="true">🔒</span></div>
+          <button id="saveMyMix" class="btn btnPreset btnSaveMix" type="button">Save My Mix</button>
+        </div>
+        <div class="presetRow" id="presetRow">
+          <button id="presetMovie" class="btn btnPreset" type="button">Movie</button>
+          <button id="presetMusic" class="btn btnPreset" type="button">Music</button>
+          <button id="presetPodcast" class="btn btnPreset" type="button">Podcast</button>
+          <button id="presetMyMix" class="btn btnPreset" type="button">My Mix</button>
+        </div>
+      </section>
+
+      <div id="trialEndedOverlay" class="trialOverlay viewHidden" aria-label="Trial ended">
+        <div class="trialOverlayCard">
+          <div class="trialOverlayTitle">Trial Ended!</div>
+          <div class="trialOverlayText">Upgrade to keep the 600% boost and Pro features.</div>
+          <button id="trialOverlayUpgrade" class="btn btnPrimary" type="button">Upgrade Now</button>
+        </div>
+      </div>
 
       <section class="footer" aria-label="Actions">
         <button id="reset" class="btn btnSecondary" type="button">

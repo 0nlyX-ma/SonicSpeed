@@ -34,9 +34,40 @@ function getHostname() {
   }
 }
 
+const TRIAL_DURATION_MS = 15 * 60 * 1000;
+
 async function loadIsPro() {
-  const stored = await browser.storage.local.get("isPro");
-  return Boolean(stored.isPro ?? false);
+  try {
+    const stored = await browser.storage.local.get("isPro");
+    return Boolean(stored.isPro ?? false);
+  } catch {
+    return false;
+  }
+}
+
+async function loadTrialStartTime() {
+  try {
+    const stored = await browser.storage.local.get("trialStartTime");
+    const t = stored.trialStartTime;
+    return typeof t === "number" && t > 0 ? t : null;
+  } catch {
+    return null;
+  }
+}
+
+function getTrialRemainingMs(startTime) {
+  if (!startTime) return 0;
+  const elapsed = Date.now() - startTime;
+  return Math.max(0, TRIAL_DURATION_MS - elapsed);
+}
+
+function isTrialActive(startTime) {
+  return getTrialRemainingMs(startTime) > 0;
+}
+
+async function getEffectiveIsPro() {
+  const [isPro, trialStart] = await Promise.all([loadIsPro(), loadTrialStartTime()]);
+  return isPro || isTrialActive(trialStart);
 }
 
 async function loadSettingsForHostname(hostname, isPro) {
@@ -251,7 +282,24 @@ function applySpeedAndPitchToVideo(video, speed, pitchSemitones) {
 }
 
 let currentIsPro = false;
+let currentTrialStartTime = null;
 let currentSettings = { ...DEFAULTS };
+
+async function refreshEffectivePro() {
+  try {
+    const stored = await browser.storage.local.get(["isPro", "trialStartTime"]);
+    currentIsPro = Boolean(stored.isPro ?? false);
+    const t = stored.trialStartTime;
+    currentTrialStartTime = typeof t === "number" && t > 0 ? t : null;
+    if (currentTrialStartTime && !isTrialActive(currentTrialStartTime)) {
+      currentTrialStartTime = null;
+    }
+    currentIsPro = currentIsPro || isTrialActive(currentTrialStartTime);
+  } catch {
+    currentIsPro = false;
+    currentTrialStartTime = null;
+  }
+}
 
 async function applySettingsToAllVideos(settings) {
   const next = sanitizeSettings(settings, currentIsPro);
@@ -334,74 +382,100 @@ function getPrimaryPipeline() {
 }
 
 function init() {
-  const hostname = getHostname();
-  if (!hostname) return;
+  try {
+    const hostname = getHostname();
+    if (!hostname) return;
 
-  void (async () => {
-    currentIsPro = await loadIsPro();
-    const stored = await loadSettingsForHostname(hostname, currentIsPro);
-    await applySettingsToAllVideos(stored);
-  })();
-
-  startVideoObserver();
-
-  browser.storage.onChanged.addListener((changes, areaName) => {
-    if (areaName !== "local") return;
     void (async () => {
-      if (changes.isPro) currentIsPro = Boolean(changes.isPro.newValue);
-      if (changes.domainSettings || changes.isPro) {
+      try {
+        await refreshEffectivePro();
         const stored = await loadSettingsForHostname(hostname, currentIsPro);
         await applySettingsToAllVideos(stored);
+      } catch {
+        // Bypass: keep video playing normally on error (e.g. YouTube).
       }
     })();
-  });
 
-  browser.runtime.onMessage.addListener((msg) => {
-    const m = msg && typeof msg === "object" ? msg : {};
-    if (m.type === "SSE_PING") {
-      return Promise.resolve({ hasVideo: getVideos().length > 0 });
-    }
-    if (m.type === "SSE_APPLY") {
-      return (async () => {
-        const settings = sanitizeSettings(m.settings, currentIsPro);
-        await applySettingsToAllVideos(settings);
-        return { ok: true };
-      })();
-    }
-    if (m.type === "SSE_GET_VIZ") {
-      return (async () => {
-        if (!currentIsPro) return { ok: false, reason: "not_pro" };
-        const primary = getPrimaryPipeline();
-        if (!primary) return { ok: true, active: false, levels: [] };
+    startVideoObserver();
 
-        const isPlaying = !primary.video.paused && !primary.video.ended;
-        let pipe = primary.pipe;
-        if (!pipe) {
-          pipe = await ensurePipelineForVideo(primary.video);
-          if (!pipe) return { ok: true, active: false, levels: [] };
+    browser.storage.onChanged.addListener((changes, areaName) => {
+      if (areaName !== "local") return;
+      void (async () => {
+        try {
+          if (changes.isPro != null || changes.trialStartTime != null) {
+            await refreshEffectivePro();
+          }
+          if (changes.domainSettings || changes.isPro != null || changes.trialStartTime != null) {
+            const stored = await loadSettingsForHostname(hostname, currentIsPro);
+            await applySettingsToAllVideos(stored);
+          }
+        } catch {
+          // ignore
         }
-
-        const levels = computeVizLevels(pipe.analyser, 24);
-        pipe.lastVizLevels = levels;
-        return { ok: true, active: isPlaying, levels };
       })();
-    }
-    if (m.type === "SSE_RESUME_CTX") {
-      return (async () => {
-        const ctx = await ensureAudioContext();
-        if (!ctx) return { ok: false };
-        if (ctx.state === "suspended") {
+    });
+
+    browser.runtime.onMessage.addListener((msg) => {
+      const m = msg && typeof msg === "object" ? msg : {};
+      if (m.type === "SSE_PING") {
+        try {
+          return Promise.resolve({ hasVideo: getVideos().length > 0 });
+        } catch {
+          return Promise.resolve({ hasVideo: false });
+        }
+      }
+      if (m.type === "SSE_APPLY") {
+        return (async () => {
           try {
-            await ctx.resume();
+            const settings = sanitizeSettings(m.settings, currentIsPro);
+            await applySettingsToAllVideos(settings);
+            return { ok: true };
           } catch {
             return { ok: false };
           }
-        }
-        return { ok: true };
-      })();
-    }
-    return undefined;
-  });
+        })();
+      }
+      if (m.type === "SSE_GET_VIZ") {
+        return (async () => {
+          try {
+            if (!currentIsPro) return { ok: false, reason: "not_pro" };
+            const primary = getPrimaryPipeline();
+            if (!primary) return { ok: true, active: false, levels: [] };
+
+            const isPlaying = !primary.video.paused && !primary.video.ended;
+            let pipe = primary.pipe;
+            if (!pipe) {
+              pipe = await ensurePipelineForVideo(primary.video);
+              if (!pipe) return { ok: true, active: false, levels: [] };
+            }
+
+            const levels = computeVizLevels(pipe.analyser, 24);
+            pipe.lastVizLevels = levels;
+            return { ok: true, active: isPlaying, levels };
+          } catch {
+            return { ok: true, active: false, levels: [] };
+          }
+        })();
+      }
+      if (m.type === "SSE_RESUME_CTX") {
+        return (async () => {
+          try {
+            const ctx = await ensureAudioContext();
+            if (!ctx) return { ok: false };
+            if (ctx.state === "suspended") {
+              await ctx.resume();
+            }
+            return { ok: true };
+          } catch {
+            return { ok: false };
+          }
+        })();
+      }
+      return undefined;
+    });
+  } catch {
+    // Prevent extension from crashing the page (e.g. on YouTube).
+  }
 }
 
 init();

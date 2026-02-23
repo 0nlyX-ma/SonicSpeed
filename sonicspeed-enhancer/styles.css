@@ -45,6 +45,20 @@ body {
   gap: 10px;
 }
 
+.headerBadges {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.trialCountdown {
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--pink);
+  text-shadow: 0 0 10px rgba(255, 46, 99, 0.6);
+}
+
 .brand {
   display: grid;
   gap: 2px;
@@ -123,6 +137,76 @@ body {
 }
 #volume.sliderUltraBoost::-moz-range-thumb {
   box-shadow: 0 0 10px rgba(220, 53, 69, 0.85), 0 0 18px rgba(220, 53, 69, 0.5);
+}
+
+.presets {
+  margin-top: 4px;
+}
+
+.presets .row {
+  margin-bottom: 4px;
+}
+
+.presetRow {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr 1fr;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.presetRow.presetsLocked .btnPreset {
+  opacity: 0.5;
+}
+
+.btnSaveMix {
+  padding: 6px 10px;
+  font-size: 11px;
+}
+
+.trialOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.85);
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.trialOverlayCard {
+  background: linear-gradient(180deg, var(--card), var(--card2));
+  border: 1px solid rgba(255, 46, 99, 0.35);
+  border-radius: var(--radius);
+  padding: 20px;
+  max-width: 280px;
+  text-align: center;
+  box-shadow: 0 0 40px rgba(255, 46, 99, 0.2), 0 0 60px rgba(170, 46, 230, 0.15);
+}
+
+.trialOverlayTitle {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 10px;
+  text-shadow: 0 0 12px rgba(255, 46, 99, 0.4);
+}
+
+.trialOverlayText {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 16px;
+  line-height: 1.4;
+}
+
+.trialOverlay .btnPrimary {
+  width: 100%;
+}
+
+.btnPreset {
+  padding: 8px 10px;
+  font-size: 12px;
+  font-weight: 650;
 }
 
 .footer {
@@ -298,6 +382,18 @@ body {
   margin-top: 12px;
   display: grid;
   gap: 8px;
+}
+
+@keyframes goProShake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-4px); }
+  40% { transform: translateX(4px); }
+  60% { transform: translateX(-3px); }
+  80% { transform: translateX(3px); }
+}
+
+.goProShake {
+  animation: goProShake 0.4s ease-in-out;
 }
 
 .miniHint {
