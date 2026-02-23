@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SonicSpeed Pro</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="app" aria-label="SonicSpeed Pro">
+      <header class="header">
+        <div class="brand">
+          <div class="title">SonicSpeed</div>
+          <div class="subtitle">Pro</div>
+        </div>
+        <div class="pill" id="proPill" aria-label="Pro status">FREE</div>
+      </header>
+
+      <nav class="tabs" aria-label="Navigation tabs">
+        <button id="tabHome" class="tab tabActive" type="button">Home</button>
+        <button id="tabLicense" class="tab" type="button">Settings / License</button>
+      </nav>
+
+      <section id="viewHome" class="view" aria-label="Home">
+        <section class="card" aria-label="Playback controls">
+          <div class="row">
+            <div class="label">
+              <div class="labelTitle">Volume boost</div>
+              <div class="labelHint">
+                Free: up to 300% · Pro: up to 600% <span class="lock" id="lockUltra" aria-hidden="true">🔒</span>
+              </div>
+            </div>
+            <div class="value" id="volumeValue">100%</div>
+          </div>
+          <input
+            id="volume"
+            class="slider"
+            type="range"
+            min="1"
+            max="6"
+            step="0.01"
+            value="1"
+            aria-label="Volume boost"
+          />
+
+          <div class="divider" role="separator"></div>
+
+          <div class="row">
+            <div class="label">
+              <div class="labelTitle">Playback speed</div>
+              <div class="labelHint">0.1×–16×</div>
+            </div>
+            <div class="value" id="speedValue">1.0×</div>
+          </div>
+          <input
+            id="speed"
+            class="slider"
+            type="range"
+            min="0.1"
+            max="16"
+            step="0.1"
+            value="1"
+            aria-label="Playback speed"
+          />
+        </section>
+
+        <section class="card" aria-label="Pro audio features">
+          <div class="row">
+            <div class="label">
+              <div class="labelTitle">
+                Night Mode <span class="lock" aria-hidden="true">🔒</span>
+              </div>
+              <div class="labelHint">Normalize dynamics (compressor)</div>
+            </div>
+            <label class="switch" aria-label="Night Mode">
+              <input id="nightMode" type="checkbox" />
+              <span class="switchTrack" aria-hidden="true"></span>
+            </label>
+          </div>
+
+          <div class="divider" role="separator"></div>
+
+          <div class="row">
+            <div class="label">
+              <div class="labelTitle">
+                Pitch <span class="lock" aria-hidden="true">🔒</span>
+              </div>
+              <div class="labelHint">-12 to +12 semitones</div>
+            </div>
+            <div class="value" id="pitchValue">0</div>
+          </div>
+          <input
+            id="pitch"
+            class="slider"
+            type="range"
+            min="-12"
+            max="12"
+            step="1"
+            value="0"
+            aria-label="Pitch shift (semitones)"
+          />
+
+          <div class="proCta" id="proCta" aria-label="Go Pro call to action">
+            <button id="goPro" class="btn btnPrimary" type="button">Go Pro</button>
+            <div class="miniHint">Unlock Ultra-Boost, Night Mode, Pitch, and Visualizer.</div>
+          </div>
+        </section>
+
+        <section class="vizWrap card" id="vizWrap" aria-label="Audio visualizer">
+          <div class="row">
+            <div class="label">
+              <div class="labelTitle">Visualizer <span class="lock" aria-hidden="true">🔒</span></div>
+              <div class="labelHint">Live audio bars</div>
+            </div>
+            <div class="value" id="vizStatus">—</div>
+          </div>
+          <canvas id="viz" width="300" height="54" aria-label="Audio visualizer canvas"></canvas>
+        </section>
+      </section>
+
+      <section id="viewLicense" class="view viewHidden" aria-label="Settings and license">
+        <section class="card" aria-label="License">
+          <div class="labelTitle">License</div>
+          <div class="labelHint">Enter your key to enable Pro on this Firefox profile.</div>
+
+          <div class="formRow">
+            <input
+              id="licenseKey"
+              class="textInput"
+              type="text"
+              inputmode="text"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="Enter license key"
+              aria-label="License key"
+            />
+            <button id="activate" class="btn btnPrimary" type="button">Activate</button>
+          </div>
+
+          <div class="divider" role="separator"></div>
+
+          <button id="deactivate" class="btn btnSecondary" type="button">
+            Disable Pro
+          </button>
+        </section>
+      </section>
+
+      <section class="footer" aria-label="Actions">
+        <button id="reset" class="btn btnSecondary" type="button">
+          Reset to default
+        </button>
+        <div id="status" class="status" role="status" aria-live="polite"></div>
+      </section>
+    </main>
+
+    <script src="popup.js"></script>
+  </body>
+</html>
