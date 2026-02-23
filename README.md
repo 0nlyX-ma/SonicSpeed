@@ -19,3 +19,9 @@ Advanced features are locked behind a **Pro License**. Payments are handled secu
 
 ## 🔒 Security & Privacy
 This extension does not collect user data. All audio processing happens locally on the user's machine.
+
+## 🚀 Installation
+1. Download the repository as a ZIP.
+2. Open Firefox and go to `about:debugging`.
+3. Click "This Firefox" -> "Load Temporary Add-on".
+4. Select the `manifest.json` file.
