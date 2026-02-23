@@ -117,6 +117,14 @@ body {
     drop-shadow(0 0 18px rgba(170, 46, 230, 0.55));
 }
 
+/* Ultra-boost warning: red glow when volume > 300% (may distort or harm speakers) */
+#volume.sliderUltraBoost::-webkit-slider-thumb {
+  box-shadow: 0 0 10px rgba(220, 53, 69, 0.85), 0 0 18px rgba(220, 53, 69, 0.5);
+}
+#volume.sliderUltraBoost::-moz-range-thumb {
+  box-shadow: 0 0 10px rgba(220, 53, 69, 0.85), 0 0 18px rgba(220, 53, 69, 0.5);
+}
+
 .footer {
   display: grid;
   gap: 8px;
@@ -321,9 +329,17 @@ body {
 }
 
 .disabled {
-  opacity: 0.45;
+  opacity: 0.5;
   pointer-events: none;
   filter: grayscale(0.2);
+}
+
+.pitchBlock.disabled {
+  opacity: 0.5;
+}
+
+.vizWrap.vizLive {
+  box-shadow: 0 0 20px rgba(255, 46, 99, 0.25), 0 0 28px rgba(170, 46, 230, 0.2);
 }
 
 .vizWrap canvas {

@@ -61,17 +61,31 @@ async function ensureAudioContext() {
   if (audioEngine.ctx) return audioEngine.ctx;
   const Ctx = window.AudioContext || window.webkitAudioContext;
   if (!Ctx) return null;
-  audioEngine.ctx = new Ctx({ latencyHint: "interactive" });
+  try {
+    audioEngine.ctx = new Ctx({ latencyHint: "interactive" });
+  } catch {
+    // Bypass: leave ctx null so we never connect; video keeps normal audio output.
+    audioEngine.ctx = null;
+  }
   return audioEngine.ctx;
 }
 
-function configureCompressor(compressor) {
-  // Tuned to be audibly helpful without being too aggressive.
-  compressor.threshold.value = -26;
-  compressor.knee.value = 24;
-  compressor.ratio.value = 6;
-  compressor.attack.value = 0.003;
-  compressor.release.value = 0.25;
+function configureCompressor(compressor, nightMode) {
+  if (nightMode) {
+    // Night Mode: normalize dynamics — quiet parts louder, loud parts quieter.
+    compressor.threshold.value = -24;
+    compressor.knee.value = 30;
+    compressor.ratio.value = 12;
+    compressor.attack.value = 0.003;
+    compressor.release.value = 0.25;
+  } else {
+    // Default (bypass / gentle).
+    compressor.threshold.value = -26;
+    compressor.knee.value = 24;
+    compressor.ratio.value = 6;
+    compressor.attack.value = 0.003;
+    compressor.release.value = 0.25;
+  }
 }
 
 async function ensurePipelineForVideo(video) {
@@ -83,6 +97,13 @@ async function ensurePipelineForVideo(video) {
   if (!ctx) return null;
 
   try {
+    try {
+      // Helps avoid CORS issues for some providers.
+      video.crossOrigin = "anonymous";
+    } catch {
+      // ignore
+    }
+
     const source = ctx.createMediaElementSource(video);
 
     // Bypass-safe routing:
@@ -97,7 +118,7 @@ async function ensurePipelineForVideo(video) {
     const analyser = ctx.createAnalyser();
     const wetGain = ctx.createGain();
 
-    configureCompressor(compressor);
+    configureCompressor(compressor, false);
     analyser.fftSize = 256;
     analyser.smoothingTimeConstant = 0.8;
 
@@ -182,9 +203,11 @@ async function applyAudioToVideo(video, settings) {
   pipe.boostGain.gain.value = settings.volumeBoost;
 
   if (settings.nightMode) {
+    configureCompressor(pipe.compressor, true);
     pipe.compSelGain.gain.value = 1;
     pipe.bypassSelGain.gain.value = 0;
   } else {
+    configureCompressor(pipe.compressor, false);
     pipe.compSelGain.gain.value = 0;
     pipe.bypassSelGain.gain.value = 1;
   }
@@ -214,14 +237,15 @@ function applySpeedAndPitchToVideo(video, speed, pitchSemitones) {
   const semis = clampNumber(Number(pitchSemitones), -12, 12);
   const pitchFactor = Math.pow(2, semis / 12);
 
-  // Default behavior: speed changes should preserve pitch.
-  // If pitch shifting is requested, we disable pitch preservation and apply playbackRate factor.
+  // Speed only: preserve pitch so only playback speed changes.
   if (semis === 0) {
     setPreservesPitch(video, true);
     applySpeedToVideo(video, speed);
     return;
   }
 
+  // Pitch shift: disable pitch preservation and apply speed * pitch factor.
+  // (Perceived speed will change with pitch; true pitch-only would require a pitch-shifter node.)
   setPreservesPitch(video, false);
   applySpeedToVideo(video, speed * pitchFactor);
 }
@@ -262,6 +286,20 @@ function startVideoObserver() {
   });
 
   obs.observe(document.documentElement, { childList: true, subtree: true });
+
+  // Handle SPA / AJAX navigations (e.g., YouTube) by re-applying to current videos
+  // when navigation events fire.
+  window.addEventListener(
+    "yt-navigate-finish",
+    () => {
+      const vids = getVideos();
+      for (const v of vids) {
+        applySpeedAndPitchToVideo(v, currentSettings.speed, currentSettings.pitchSemitones);
+        void applyAudioToVideo(v, currentSettings);
+      }
+    },
+    { passive: true }
+  );
 }
 
 function computeVizLevels(analyser, barCount) {
@@ -331,20 +369,36 @@ function init() {
       })();
     }
     if (m.type === "SSE_GET_VIZ") {
-      if (!currentIsPro) return Promise.resolve({ ok: false, reason: "not_pro" });
-      const primary = getPrimaryPipeline();
-      if (!primary) return Promise.resolve({ ok: true, active: false, levels: [] });
+      return (async () => {
+        if (!currentIsPro) return { ok: false, reason: "not_pro" };
+        const primary = getPrimaryPipeline();
+        if (!primary) return { ok: true, active: false, levels: [] };
 
-      const isPlaying = !primary.video.paused && !primary.video.ended;
-      let pipe = primary.pipe;
-      if (!pipe) {
-        pipe = await ensurePipelineForVideo(primary.video);
-        if (!pipe) return Promise.resolve({ ok: true, active: false, levels: [] });
-      }
+        const isPlaying = !primary.video.paused && !primary.video.ended;
+        let pipe = primary.pipe;
+        if (!pipe) {
+          pipe = await ensurePipelineForVideo(primary.video);
+          if (!pipe) return { ok: true, active: false, levels: [] };
+        }
 
-      const levels = computeVizLevels(pipe.analyser, 24);
-      pipe.lastVizLevels = levels;
-      return Promise.resolve({ ok: true, active: isPlaying, levels });
+        const levels = computeVizLevels(pipe.analyser, 24);
+        pipe.lastVizLevels = levels;
+        return { ok: true, active: isPlaying, levels };
+      })();
+    }
+    if (m.type === "SSE_RESUME_CTX") {
+      return (async () => {
+        const ctx = await ensureAudioContext();
+        if (!ctx) return { ok: false };
+        if (ctx.state === "suspended") {
+          try {
+            await ctx.resume();
+          } catch {
+            return { ok: false };
+          }
+        }
+        return { ok: true };
+      })();
     }
     return undefined;
   });

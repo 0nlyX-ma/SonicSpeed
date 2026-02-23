@@ -23,10 +23,17 @@ function formatSpeed(speed) {
   return `${speed.toFixed(1)}×`;
 }
 
+// License key: allow only a-zA-Z0-9 to prevent injection. Strip any other characters.
+const LICENSE_KEY_SAFE_REGEX = /^[a-zA-Z0-9]+$/;
+
 function sanitizeLicenseKeyInput(raw) {
   const str = String(raw ?? "");
-  const alnumOnly = str.replace(/[^a-z0-9]/gi, "");
+  const alnumOnly = str.replace(/[^a-zA-Z0-9]/g, "");
   return alnumOnly.toUpperCase();
+}
+
+function isLicenseKeyValidFormat(sanitized) {
+  return LICENSE_KEY_SAFE_REGEX.test(sanitized);
 }
 
 async function getActiveTab() {
@@ -109,8 +116,15 @@ function setActiveTab(tabName) {
 
 function renderProStatus(isPro) {
   const pill = document.getElementById("proPill");
+  if (!pill) return;
   pill.textContent = isPro ? "PRO" : "FREE";
   pill.classList.toggle("pillPro", isPro);
+}
+
+/** Call after license change to sync badge, locks, and pro/free controls. */
+function refreshProUi(isPro) {
+  renderProStatus(isPro);
+  applyProGatingToUi(isPro);
 }
 
 function renderUi(settings) {
@@ -130,37 +144,52 @@ function renderUi(settings) {
   volumeValue.textContent = formatPercentFromBoost(settings.volumeBoost);
   speedValue.textContent = formatSpeed(settings.speed);
   pitchValue.textContent = String(settings.pitchSemitones);
+
+  volume.classList.toggle("sliderUltraBoost", settings.volumeBoost > 3);
 }
 
 function applyProGatingToUi(isPro) {
   const lockUltra = document.getElementById("lockUltra");
+  const lockNightMode = document.getElementById("lockNightMode");
+  const lockPitch = document.getElementById("lockPitch");
+  const lockViz = document.getElementById("lockViz");
   const proCta = document.getElementById("proCta");
   const vizWrap = document.getElementById("vizWrap");
+  const vizStatus = document.getElementById("vizStatus");
 
-  const nightModeRow = document.getElementById("nightMode").closest(".row");
+  const nightModeRow = document.getElementById("nightModeRow");
   const nightModeInput = document.getElementById("nightMode");
+  const pitchBlock = document.getElementById("pitchBlock");
   const pitchSlider = document.getElementById("pitch");
   const volumeSlider = document.getElementById("volume");
 
-  lockUltra.style.visibility = isPro ? "hidden" : "visible";
+  // When PRO: hide all lock icons. When FREE: show all.
+  const visibility = isPro ? "hidden" : "visible";
+  lockUltra.style.visibility = visibility;
+  if (lockNightMode) lockNightMode.style.visibility = visibility;
+  if (lockPitch) lockPitch.style.visibility = visibility;
+  if (lockViz) lockViz.style.visibility = visibility;
 
   if (!isPro) {
     if (nightModeRow) nightModeRow.classList.add("disabled");
-    pitchSlider.classList.add("disabled");
+    if (pitchBlock) pitchBlock.classList.add("disabled");
     nightModeInput.checked = false;
     nightModeInput.disabled = true;
     pitchSlider.value = "0";
     pitchSlider.disabled = true;
     volumeSlider.max = "3";
-    vizWrap.classList.add("viewHidden");
+    vizWrap.classList.remove("viewHidden");
+    vizWrap.classList.remove("vizLive");
+    vizStatus.textContent = "\u{1F512}"; // lock icon
     proCta.classList.remove("viewHidden");
   } else {
     if (nightModeRow) nightModeRow.classList.remove("disabled");
-    pitchSlider.classList.remove("disabled");
+    if (pitchBlock) pitchBlock.classList.remove("disabled");
     nightModeInput.disabled = false;
     pitchSlider.disabled = false;
     volumeSlider.max = "6";
     vizWrap.classList.remove("viewHidden");
+    vizStatus.textContent = "—";
     proCta.classList.add("viewHidden");
   }
 }
@@ -271,11 +300,22 @@ document.addEventListener("DOMContentLoaded", async () => {
   setControlsEnabled(true);
   setActiveTab("home");
 
+  // Any click inside the popup counts as a user gesture; ask the content
+  // script to resume its AudioContext so Web Audio can start safely.
+  document.addEventListener(
+    "click",
+    () => {
+      if (typeof tab.id === "number") {
+        void browser.tabs.sendMessage(tab.id, { type: "SSE_RESUME_CTX" });
+      }
+    },
+    { passive: true }
+  );
+
   let isPro = await loadIsPro();
-  renderProStatus(isPro);
+  refreshProUi(isPro);
 
   const { all, settings: storedSettings } = await loadDomainSettings(hostname);
-  applyProGatingToUi(isPro);
   const effectiveSettings = sanitizeSettingsForPlan(storedSettings, isPro);
   renderUi(effectiveSettings);
 
@@ -308,20 +348,35 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   let vizTimer = 0;
   let vizInFlight = false;
+  let popupClosed = false;
+
+  function stopVisualizer() {
+    popupClosed = true;
+    if (vizTimer) {
+      window.clearInterval(vizTimer);
+      vizTimer = 0;
+    }
+  }
+
   const startVizLoop = () => {
+    popupClosed = false;
     if (vizTimer) window.clearInterval(vizTimer);
     vizTimer = window.setInterval(async () => {
-      if (!isPro) return;
+      if (popupClosed || !isPro) return;
       if (vizInFlight) return;
       vizInFlight = true;
       try {
+        if (popupClosed) return;
         const frame = await getVizFrame(tab.id);
+        if (popupClosed) return;
         if (!frame || frame.ok !== true) {
           vizStatus.textContent = "—";
+          document.getElementById("vizWrap").classList.remove("vizLive");
           drawVisualizer(vizCanvas, []);
           return;
         }
         vizStatus.textContent = frame.active ? "LIVE" : "IDLE";
+        document.getElementById("vizWrap").classList.toggle("vizLive", frame.active);
         drawVisualizer(vizCanvas, frame.levels);
       } finally {
         vizInFlight = false;
@@ -329,13 +384,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     }, 70);
   };
   startVizLoop();
-  window.addEventListener(
-    "unload",
-    () => {
-      if (vizTimer) window.clearInterval(vizTimer);
-    },
-    { passive: true }
-  );
+
+  window.addEventListener("unload", stopVisualizer, { passive: true });
+  window.addEventListener("beforeunload", stopVisualizer, { passive: true });
 
   const debouncedApply = createDebounced(async () => {
     const nextSettings = readUiSettings(isPro);
@@ -348,9 +399,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     );
   }, 80);
 
-  document.getElementById("volume").addEventListener("input", (e) => {
+  const volumeSliderEl = document.getElementById("volume");
+  volumeSliderEl.addEventListener("input", (e) => {
     const v = clampNumber(Number(e.currentTarget.value), 1, isPro ? 6 : 3);
     volumeValue.textContent = formatPercentFromBoost(v);
+    volumeSliderEl.classList.toggle("sliderUltraBoost", v > 3);
     debouncedApply();
   });
 
@@ -388,11 +441,14 @@ document.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("activate").addEventListener("click", async () => {
     const raw = document.getElementById("licenseKey").value;
     const sanitized = sanitizeLicenseKeyInput(raw);
+    if (!isLicenseKeyValidFormat(sanitized)) {
+      setStatus(statusEl, "Invalid key format. Use only letters and numbers.");
+      return;
+    }
     const ok = sanitized === LICENSE_ACCEPTED_SANITIZED;
     await saveIsPro(ok);
     isPro = ok;
-    renderProStatus(isPro);
-    applyProGatingToUi(isPro);
+    refreshProUi(isPro);
     setStatus(statusEl, ok ? "Pro activated." : "Invalid key.");
     startVizLoop();
     const loaded = await loadDomainSettings(hostname);
@@ -406,10 +462,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("deactivate").addEventListener("click", async () => {
     await saveIsPro(false);
     isPro = false;
-    renderProStatus(isPro);
-    applyProGatingToUi(isPro);
+    refreshProUi(isPro);
     setStatus(statusEl, "Pro disabled.");
-    vizStatus.textContent = "PRO";
     drawVisualizer(vizCanvas, []);
     const loaded = await loadDomainSettings(hostname);
     const effective = sanitizeSettingsForPlan(loaded.settings, isPro);

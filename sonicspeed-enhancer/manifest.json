@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "SonicSpeed Pro",
   "description": "Neon OLED volume boost, speed control, and pro audio features for any HTML5 video, with per-site memory.",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "browser_specific_settings": {
     "gecko": {
       "id": "sonicspeed-pro@example.com"

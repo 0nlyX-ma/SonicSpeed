@@ -65,10 +65,10 @@
         </section>
 
         <section class="card" aria-label="Pro audio features">
-          <div class="row">
+          <div class="row" id="nightModeRow">
             <div class="label">
               <div class="labelTitle">
-                Night Mode <span class="lock" aria-hidden="true">🔒</span>
+                Night Mode <span class="lock" id="lockNightMode" aria-hidden="true">🔒</span>
               </div>
               <div class="labelHint">Normalize dynamics (compressor)</div>
             </div>
@@ -80,25 +80,27 @@
 
           <div class="divider" role="separator"></div>
 
-          <div class="row">
-            <div class="label">
-              <div class="labelTitle">
-                Pitch <span class="lock" aria-hidden="true">🔒</span>
+          <div id="pitchBlock" class="pitchBlock">
+            <div class="row">
+              <div class="label">
+                <div class="labelTitle">
+                  Pitch <span class="lock" id="lockPitch" aria-hidden="true">🔒</span>
+                </div>
+                <div class="labelHint">-12 to +12 semitones</div>
               </div>
-              <div class="labelHint">-12 to +12 semitones</div>
+              <div class="value" id="pitchValue">0</div>
             </div>
-            <div class="value" id="pitchValue">0</div>
+            <input
+              id="pitch"
+              class="slider"
+              type="range"
+              min="-12"
+              max="12"
+              step="1"
+              value="0"
+              aria-label="Pitch shift (semitones)"
+            />
           </div>
-          <input
-            id="pitch"
-            class="slider"
-            type="range"
-            min="-12"
-            max="12"
-            step="1"
-            value="0"
-            aria-label="Pitch shift (semitones)"
-          />
 
           <div class="proCta" id="proCta" aria-label="Go Pro call to action">
             <button id="goPro" class="btn btnPrimary" type="button">Go Pro</button>
@@ -109,7 +111,7 @@
         <section class="vizWrap card" id="vizWrap" aria-label="Audio visualizer">
           <div class="row">
             <div class="label">
-              <div class="labelTitle">Visualizer <span class="lock" aria-hidden="true">🔒</span></div>
+              <div class="labelTitle">Visualizer <span class="lock" id="lockViz" aria-hidden="true">🔒</span></div>
               <div class="labelHint">Live audio bars</div>
             </div>
             <div class="value" id="vizStatus">—</div>
