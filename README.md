@@ -8,17 +8,23 @@
 - **Night Mode (Pro):** Real-time audio compression to balance loud and quiet sounds.
 - **Pitch Shifter (Pro):** Change the pitch of any video without affecting speed.
 - **Visualizer (Pro):** A beautiful, neon-accented audio frequency visualizer.
+- **Presets (Pro):** One-click optimization for Movies, Music, and Podcasts.
 
-## 🛠 Tech Stack
-- **Language:** JavaScript (Vanilla), HTML5, CSS3
-- **APIs:** Web Audio API (GainNode, DynamicsCompressorNode, StereoPannerNode)
-- **Manifest:** Firefox WebExtensions Manifest V3
+## 💳 Monetization & Licensing
+Advanced features require a **Pro License**. 
+- **Payments:** Handled securely via **Lemon Squeezy** (Merchant of Record).
+- **Free Trial:** A 15-minute fully unlocked trial is available within the extension.
 
-## 💳 Monetization
-Advanced features are locked behind a **Pro License**. Payments are handled securely via **Lemon Squeezy**.
+## 🔒 Privacy Policy
+We value your privacy. 
+- **No Data Collection:** SonicSpeed Pro does not collect, store, or transmit any personal data, browsing history, or audio content.
+- **Local Processing:** All audio enhancements are processed in real-time on your local machine.
+- **Permissions:** The extension requires `<all_urls>` permission solely to access HTML5 video/audio elements on the websites you visit to apply audio filters.
 
-## 🔒 Security & Privacy
-This extension does not collect user data. All audio processing happens locally on the user's machine.
+## 🛠 Support & Contact
+If you encounter any issues or have questions regarding your license, please contact:
+- **Email:** aitbouhou.abdallah1@gmail.com
+- **Response Time:** We typically respond within 24-48 hours.
 
 ## 🚀 Installation
 1. Download the repository as a ZIP.
